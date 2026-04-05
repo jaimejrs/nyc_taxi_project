@@ -219,16 +219,16 @@ try:
             d_trips = d_rev = d_fare = d_tip = None
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🚖 Total de Corridas",
+        col1.metric("Total de Corridas",
                     fmt_int(total_trips),
                     delta=fmt_int(d_trips) if d_trips is not None else None)
-        col2.metric("💵 Receita Total (USD)",
+        col2.metric("Receita Total (USD)",
                     f"$ {fmt_brl(total_rev)}",
                     delta=f"$ {fmt_brl(d_rev)}" if d_rev is not None else None)
-        col3.metric("🎫 Ticket Médio (USD)",
+        col3.metric("Ticket Médio (USD)",
                     f"$ {avg_fare:.2f}",
                     delta=f"{d_fare:+.2f}" if d_fare is not None else None)
-        col4.metric("💡 Gorjeta Média",
+        col4.metric("Gorjeta Média",
                     f"{avg_tip_pct:.1f} %",
                     delta=f"{d_tip:+.1f} %" if d_tip is not None else None)
 
@@ -263,7 +263,7 @@ try:
         st.divider()
 
         # --- Comparativo Dia Útil vs Fim de Semana ---
-        st.subheader("📆 Dia Útil vs Fim de Semana")
+        st.subheader("Dia Útil vs Fim de Semana")
 
         wknd_data = extra.get("weekend")
         if wknd_data is not None:
@@ -363,20 +363,34 @@ try:
         except Exception:
             pass
 
+        n_cols = len(hm_pivot.columns)
+        n_rows = len(hm_pivot.index)
+        cell_h = max(80, 480 // max(n_rows, 1))
         fig_hm = px.imshow(
             hm_pivot,
-            text_auto=".1f",
+            text_auto=".2f",
             color_continuous_scale="Blues",
-            title="% Corridas: Turno × Tipo de Pagamento",
-            labels={"x": "Pagamento", "y": "Turno", "color": "%"},
+            title="% de Corridas por Turno e Tipo de Pagamento",
+            labels={"x": "Tipo de Pagamento", "y": "Turno do Dia", "color": "% Corridas"},
+            aspect="auto",
             **plotly_defaults(),
         )
-        apply_font(fig_hm).update_layout(height=300)
-        st.plotly_chart(fig_hm, use_container_width=True)
+        apply_font(fig_hm).update_layout(
+            height=max(380, n_rows * cell_h),
+            title_font_size=15,
+            xaxis=dict(tickangle=-20, tickfont=dict(size=12)),
+            yaxis=dict(tickfont=dict(size=13)),
+            coloraxis_colorbar=dict(title="%", tickformat=".1f"),
+            margin=dict(l=10, r=10, t=50, b=10),
+        )
+        fig_hm.update_traces(
+            textfont=dict(size=14, color="black"),
+        )
+        st.plotly_chart(fig_hm, use_container_width=True, key="hm_payment")
 
         # --- Rentabilidade ---
         st.divider()
-        st.subheader("📈 Análise de Rentabilidade")
+        st.subheader("Análise de Rentabilidade")
 
         rnt_col1, rnt_col2 = st.columns(2)
 
@@ -461,7 +475,7 @@ try:
         st.divider()
 
         # --- Distribuições Estatísticas ---
-        st.subheader("📊 Distribuições & Percentis")
+        st.subheader("Distribuições & Percentis")
 
         dist_col1, dist_col2 = st.columns(2)
 
@@ -510,7 +524,7 @@ try:
         st.divider()
 
         # --- Tabela de operações diárias ---
-        st.subheader("📋 Métricas Diárias Detalhadas")
+        st.subheader("Métricas Diárias Detalhadas")
         oper_display = df_filt[[
             "pickup_date", "Mês", "total_trips", "avg_distance", "avg_duration"
         ]].copy()
@@ -526,7 +540,7 @@ try:
     # ABA 4: VISÃO GEOGRÁFICA
     # ═══════════════════════════════════════════
     with tab_geo:
-        st.subheader("🗺️ Mapa de Demanda — Origem das Corridas")
+        st.subheader("Mapa de Demanda — Origem das Corridas")
         st.markdown("Visualize a concentração de corridas por hora do dia usando o mapa de calor geográfico (Jan 2015).")
 
         hora_sel = st.slider("Filtre pela Hora do Dia (0 a 23h)", 0, 23, 12, 1)
@@ -541,59 +555,53 @@ try:
             df_map["lon"].between(-74.3, -73.6)
         ]
 
-        geo_col1, geo_col2 = st.columns([3, 1])
+        # Métricas laterais compactas ANTES do mapa
+        geo_kpi1, geo_kpi2, geo_kpi3 = st.columns(3)
+        geo_kpi1.metric("Corridas nessa hora", fmt_int(len(df_map)))
+        pct_hora = len(df_map) / max(len(df_detailed), 1) * 100
+        geo_kpi2.metric("% da amostra", f"{pct_hora:.1f} %")
+        top_dist_all = df_detailed[
+            df_detailed["pickup_datetime"].dt.hour == hora_sel
+        ]["distance_range"].value_counts()
+        top_faixa = top_dist_all.index[0] if len(top_dist_all) > 0 else "—"
+        geo_kpi3.metric("Faixa dominante", str(top_faixa))
 
-        with geo_col1:
-            if len(df_map) > 0:
-                try:
-                    import pydeck as pdk
-                    layer = pdk.Layer(
-                        "HeatmapLayer",
-                        data=df_map,
-                        get_position="[lon, lat]",
-                        aggregation=pdk.types.String("MEAN"),
-                        get_weight=1,
-                        radius_pixels=35,
-                        intensity=1,
-                        threshold=0.03,
-                        color_range=[
-                            [0, 25, 180, 0],
-                            [0, 100, 220, 180],
-                            [0, 200, 150, 200],
-                            [255, 200, 0, 220],
-                            [255, 80, 0, 240],
-                            [255, 0, 0, 255],
-                        ],
-                    )
-                    view = pdk.ViewState(
-                        latitude=40.72, longitude=-73.98,
-                        zoom=11, pitch=0,
-                    )
-                    deck = pdk.Deck(
-                        layers=[layer],
-                        initial_view_state=view,
-                        map_style="mapbox://styles/mapbox/dark-v10",
-                    )
-                    st.pydeck_chart(deck, use_container_width=True, height=480)
-                except Exception:
-                    st.map(df_map[["lat", "lon"]], use_container_width=True)
-            else:
-                st.warning("Nenhuma corrida na amostra para esse horário.")
+        if len(df_map) > 0:
+            fig_density = px.density_mapbox(
+                df_map,
+                lat="lat",
+                lon="lon",
+                radius=14,
+                center=dict(lat=40.722, lon=-73.985),
+                zoom=11,
+                mapbox_style="open-street-map",
+                color_continuous_scale=[
+                    [0.0,  "rgba(0,0,255,0)"],
+                    [0.2,  "rgba(0,120,255,0.5)"],
+                    [0.5,  "rgba(50,220,100,0.75)"],
+                    [0.75, "rgba(255,200,0,0.85)"],
+                    [1.0,  "rgba(255,30,0,1.0)"],
+                ],
+                title=f"Densidade de Embarques — {hora_sel:02d}h (amostra Jan/2015)",
+                **plotly_defaults(),
+            )
+            apply_font(fig_density).update_layout(
+                height=540,
+                margin=dict(l=0, r=0, t=40, b=0),
+                coloraxis_showscale=False,
+            )
+            st.plotly_chart(fig_density, use_container_width=True, key="geo_density")
 
-        with geo_col2:
-            st.markdown(f"**Hora selecionada:** `{hora_sel}:00`")
-            st.metric("Corridas nessa hora", fmt_int(len(df_map)))
-            pct = len(df_map) / len(df_detailed) * 100
-            st.metric("% da amostra", f"{pct:.1f} %")
-
-            st.markdown("---")
+            # Faixas de distância na hora selecionada
             top_dist = df_detailed[
                 df_detailed["pickup_datetime"].dt.hour == hora_sel
             ]["distance_range"].value_counts().reset_index()
             top_dist.columns = ["Faixa", "Corridas"]
             top_dist["Faixa"] = top_dist["Faixa"].astype(str)
-            st.markdown("**Faixas de distância**")
-            st.dataframe(top_dist, use_container_width=True, hide_index=True)
+            with st.expander("Faixas de distância nessa hora", expanded=False):
+                st.dataframe(top_dist, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Nenhuma corrida na amostra para esse horário.")
 
     # ═══════════════════════════════════════════
     # ABA 5: ANOMALIAS
@@ -607,9 +615,9 @@ try:
 
         # KPIs de impacto
         a1, a2, a3 = st.columns(3)
-        a1.metric("⚠️ Anomalias na Amostra",  fmt_int(len(df_anom)))
-        a2.metric("💸 Receita nas Anomalias", f"$ {anom_rev:.2f}")
-        a3.metric("📉 % da Receita da Amostra",
+        a1.metric("Anomalias na Amostra",  fmt_int(len(df_anom)))
+        a2.metric("Receita nas Anomalias", f"$ {anom_rev:.2f}")
+        a3.metric(" % da Receita da Amostra",
                   f"{(anom_rev / total_rev_sample * 100):.4f} %")
 
         if len(df_anom) > 0:
